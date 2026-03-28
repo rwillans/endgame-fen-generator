@@ -1,0 +1,4 @@
+python-chess>=1.999
+PyYAML>=6.0.1
+zstandard>=0.22.0
+pytest>=8.0.0
