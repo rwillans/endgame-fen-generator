@@ -1,2 +1,4 @@
 /.pytest_cache
 /.venv
+/training_positions/_pycache_/*
+/training_positions/_init_.py
