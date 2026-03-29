@@ -24,3 +24,6 @@ extract-training-positions = "training_positions.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+  "ignore:'asyncio.DefaultEventLoopPolicy' is deprecated and slated for removal in Python 3.16:DeprecationWarning",
+]

@@ -15,7 +15,7 @@ SAMPLE_PGN = """[Event \"Rated Rapid game\"]
 [SetUp \"1\"]
 [FEN \"8/6kp/3r2p1/3P4/1p3P2/1P4P1/P5KP/3R4 w - - 0 20\"]
 
-20. Kg2 Kf8 21. Kf3 Ke7 22. Ke4 Kd7 23. Rc1 f6 24. Rc2 h6 25. h3 Kd6 1/2-1/2
+20. Kf3 Kf7 21. Ke4 Ke7 22. Rc1 Kd7 23. Rc2 h6 24. h4 h5 1/2-1/2
 """
 
 

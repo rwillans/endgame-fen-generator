@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, Any
 
 import chess
-import chess.engine
 
 from .models import EvalInfo, ExtractConfig
+
+if TYPE_CHECKING:
+    import chess.engine
 
 EVAL_PATTERNS = (
     re.compile(r"\[%eval\s+([^\]]+)\]"),
@@ -77,11 +80,13 @@ def project_eval(eval_info: EvalInfo, board: chess.Board, config: ExtractConfig,
 class StockfishEvaluator:
     def __init__(self, config: ExtractConfig) -> None:
         self.config = config
-        self._engine: chess.engine.SimpleEngine | None = None
+        self._engine: Any | None = None
         self._cache: dict[str, EvalInfo | None] = {}
 
     def __enter__(self) -> "StockfishEvaluator":
         if self.config.eval_source in {"stockfish", "pgn_or_stockfish"} and self.config.stockfish_path:
+            import chess.engine
+
             self._engine = chess.engine.SimpleEngine.popen_uci(str(self.config.stockfish_path))
         return self
 
@@ -96,6 +101,8 @@ class StockfishEvaluator:
         if self._engine is None:
             self._cache[cache_key] = None
             return None
+        import chess.engine
+
         limit_kwargs = {"depth": self.config.stockfish_depth}
         if self.config.stockfish_nodes:
             limit_kwargs["nodes"] = self.config.stockfish_nodes
