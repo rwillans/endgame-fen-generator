@@ -57,6 +57,7 @@ def test_extract_positions_end_to_end(tmp_path):
     assert records[0]["opening"] == "Queen's Gambit Declined"
     assert records[0]["eco"] == "D35"
     assert "fen" in records[0]
+    assert records[0]["lichess_analysis_url"].startswith("https://lichess.org/analysis/")
     assert "training_score" in records[0]
 
 
@@ -84,3 +85,4 @@ def test_summary_mode(tmp_path):
     rows = extract_positions(config)
     assert rows
     assert rows[0]["opening"] == "Queen's Gambit Declined"
+

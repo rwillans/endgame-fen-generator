@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import chess
 
+from .eval_cache import EvalCache
 from .models import EvalInfo, ExtractConfig
 
 if TYPE_CHECKING:
@@ -78,10 +79,12 @@ def project_eval(eval_info: EvalInfo, board: chess.Board, config: ExtractConfig,
 
 
 class StockfishEvaluator:
-    def __init__(self, config: ExtractConfig) -> None:
+    def __init__(self, config: ExtractConfig, eval_cache: EvalCache | None = None) -> None:
         self.config = config
+        self.eval_cache = eval_cache
         self._engine: Any | None = None
         self._cache: dict[str, EvalInfo | None] = {}
+        self.analysis_calls = 0
 
     def __enter__(self) -> "StockfishEvaluator":
         if self.config.eval_source in {"stockfish", "pgn_or_stockfish"} and self.config.stockfish_path:
@@ -98,6 +101,11 @@ class StockfishEvaluator:
     def evaluate(self, board: chess.Board, cache_key: str) -> EvalInfo | None:
         if cache_key in self._cache:
             return self._cache[cache_key]
+        if self.eval_cache is not None:
+            cached = self.eval_cache.get(cache_key)
+            if cached is not EvalCache.MISS:
+                self._cache[cache_key] = cached if isinstance(cached, EvalInfo) else None
+                return self._cache[cache_key]
         if self._engine is None:
             self._cache[cache_key] = None
             return None
@@ -113,7 +121,10 @@ class StockfishEvaluator:
         else:
             cp = score.score()
             result = EvalInfo(source="stockfish", raw=f"{cp / 100:.2f}", cp=cp, pawns=cp / 100)
+        self.analysis_calls += 1
         self._cache[cache_key] = result
+        if self.eval_cache is not None:
+            self.eval_cache.put(cache_key, result)
         return result
 
 
@@ -127,6 +138,8 @@ def choose_eval(
     if config.eval_source == "none":
         return pgn_eval
     if config.eval_source == "pgn":
+        return pgn_eval
+    if config.skip_engine_if_pgn_eval_present and pgn_eval is not None:
         return pgn_eval
     if config.eval_source == "stockfish":
         return evaluator.evaluate(board, cache_key)

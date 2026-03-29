@@ -10,14 +10,24 @@ from .models import COLORS, PIECE_TYPES, ExtractConfig, RangeConstraint
 DEFAULTS: dict[str, Any] = {
     "output_format": None,
     "mode": "extract",
+    "workflow": None,
+    "dry_run_summary": False,
     "opening": None,
     "variation": None,
     "eco": None,
+    "result": None,
+    "variant": None,
+    "event_contains": None,
     "min_rating": 1600,
-    "time_controls": "blitz,rapid,classical",
+    "time_controls": "rapid,classical",
     "phase": "endgame",
     "side_to_move": "either",
     "min_move_number": 20,
+    "sample_every_n_plies": 1,
+    "only_after_queens_off": False,
+    "max_non_pawn_material": None,
+    "stop_after_first_match_per_game": False,
+    "max_matches_per_game": None,
     "eval_min": None,
     "eval_max": None,
     "eval_source": "none",
@@ -26,6 +36,9 @@ DEFAULTS: dict[str, Any] = {
     "stockfish_nodes": None,
     "mate_score_policy": "exclude",
     "eval_perspective": "white",
+    "skip_engine_if_pgn_eval_present": False,
+    "eval_cache_path": None,
+    "reuse_eval_cache": False,
     "max_positions": 100,
     "positions_per_game": 1,
     "dedupe": "normalized_fen",
@@ -51,6 +64,19 @@ DEFAULTS: dict[str, Any] = {
     "allow_nonstandard": False,
     "summary_limit": 50,
     "log_level": "INFO",
+    "write_candidates": None,
+    "write_header_pass_pgn": None,
+    "read_candidates": None,
+    "candidate_format": "jsonl",
+    "append_candidates": False,
+    "max_candidates": None,
+    "sample_games": None,
+    "sample_candidates": None,
+    "random_seed": None,
+    "merge_candidates": None,
+    "merge_outputs": None,
+    "shard_label": None,
+    "candidate_history_moves": 8,
 }
 
 
@@ -63,14 +89,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", dest="output_path")
     parser.add_argument("--output-format", choices=("jsonl", "csv", "fen", "pgn", "html"))
     parser.add_argument("--mode", choices=("extract", "summary", "trainer_export"))
+    parser.add_argument("--workflow", choices=("fast_training_pack",))
+    parser.add_argument("--dry-run-summary", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--opening")
     parser.add_argument("--variation")
     parser.add_argument("--eco", help="ECO exact code, comma-separated list, or range like D30:D69.")
+    parser.add_argument("--result", help="Comma-separated results to keep, for example 1-0,0-1,1/2-1/2.")
+    parser.add_argument("--variant", help="Comma-separated Variant header filters.")
+    parser.add_argument("--event-contains", help="Keep only games whose Event header contains this text.")
     parser.add_argument("--min-rating", type=int)
-    parser.add_argument("--time-controls", help="Comma-separated time classes such as blitz,rapid,classical.")
+    parser.add_argument("--time-controls", help="Comma-separated time classes such as rapid,classical.")
     parser.add_argument("--phase", choices=("exact_material_only", "simplified", "endgame", "final_phase"))
     parser.add_argument("--side-to-move", choices=("either", "white", "black"))
     parser.add_argument("--min-move-number", type=int)
+    parser.add_argument("--start-at-move", dest="start_at_move", type=int)
+    parser.add_argument("--sample-every-n-plies", type=int)
+    parser.add_argument("--only-after-queens-off", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--max-non-pawn-material", type=int)
+    parser.add_argument("--stop-after-first-match-per-game", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--max-matches-per-game", type=int)
     parser.add_argument("--eval-min", type=float)
     parser.add_argument("--eval-max", type=float)
     parser.add_argument("--eval-source", choices=("none", "pgn", "stockfish", "pgn_or_stockfish"))
@@ -79,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stockfish-nodes", type=int)
     parser.add_argument("--mate-score-policy", choices=("exclude", "cap", "include"))
     parser.add_argument("--eval-perspective", choices=("white", "side_to_move", "side_requested"))
+    parser.add_argument("--skip-engine-if-pgn-eval-present", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--eval-cache-path")
+    parser.add_argument("--reuse-eval-cache", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--max-positions", type=int)
     parser.add_argument("--positions-per-game", type=int)
     parser.add_argument(
@@ -109,6 +149,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress-every", type=int)
     parser.add_argument("--summary-limit", type=int)
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    parser.add_argument("--write-candidates")
+    parser.add_argument("--write-header-pass-pgn")
+    parser.add_argument("--read-candidates")
+    parser.add_argument("--candidate-format", choices=("jsonl",))
+    parser.add_argument("--append-candidates", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--max-candidates", type=int)
+    parser.add_argument("--sample-games", type=int)
+    parser.add_argument("--sample-candidates", type=int)
+    parser.add_argument("--random-seed", type=int)
+    parser.add_argument("--merge-candidates", nargs="+")
+    parser.add_argument("--merge-outputs", nargs="+")
+    parser.add_argument("--shard-label")
 
     for name, help_text in (
         ("exclude-checkmate-nearby", "Reject positions that are only a few plies before a mating finish."),
@@ -179,9 +231,11 @@ def normalize_piece_settings(settings: dict[str, Any], color: str) -> dict[str, 
     return constraints
 
 
-def infer_output_format(output_path: Path, explicit: str | None) -> str:
+def infer_output_format(output_path: Path | None, explicit: str | None) -> str:
     if explicit:
         return explicit
+    if output_path is None:
+        return "jsonl"
     suffix = output_path.suffix.lower()
     return {
         ".jsonl": "jsonl",
@@ -192,37 +246,101 @@ def infer_output_format(output_path: Path, explicit: str | None) -> str:
     }.get(suffix, "jsonl")
 
 
+def apply_workflow_defaults(settings: dict[str, Any], explicit_keys: set[str]) -> None:
+    if settings.get("workflow") != "fast_training_pack":
+        return
+    workflow_defaults = {
+        "time_controls": "rapid,classical",
+        "eval_source": "none",
+        "positions_per_game": 1,
+        "stop_after_first_match_per_game": True,
+        "max_matches_per_game": 1,
+        "sample_every_n_plies": 2,
+        "only_after_queens_off": True,
+    }
+    for key, value in workflow_defaults.items():
+        if key not in explicit_keys:
+            settings[key] = value
+
+
+def _as_path_tuple(value: Any) -> tuple[Path, ...]:
+    if not value:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(Path(item) for item in value)
+    return (Path(str(value)),)
+
+
 def build_config(args: argparse.Namespace) -> ExtractConfig:
     settings = dict(DEFAULTS)
     if args.config:
         settings.update(parse_config_file(args.config))
+
+    explicit_keys = {key for key, value in vars(args).items() if value is not None}
     for key, value in vars(args).items():
         if value is not None:
             settings[key] = value
 
-    input_path = settings.get("input_path")
-    output_path = settings.get("output_path")
-    if not input_path:
-        raise ValueError("--input is required unless supplied via config.")
-    if not output_path:
-        raise ValueError("--output is required unless supplied via config.")
+    if settings.get("start_at_move") is not None:
+        settings["min_move_number"] = settings["start_at_move"]
 
-    output_path_obj = Path(output_path)
+    apply_workflow_defaults(settings, explicit_keys)
+
+    input_path = settings.get("input_path")
+    read_candidates = _as_path_tuple(settings.get("read_candidates"))
+    merge_candidates = _as_path_tuple(settings.get("merge_candidates"))
+    merge_outputs = _as_path_tuple(settings.get("merge_outputs"))
+    write_candidates = settings.get("write_candidates")
+    write_header_pass_pgn = settings.get("write_header_pass_pgn")
+    output_path = settings.get("output_path")
+
+    if not input_path and not read_candidates and not merge_candidates and not merge_outputs:
+        raise ValueError("--input, --read-candidates, --merge-candidates, or --merge-outputs is required.")
+    if input_path and read_candidates:
+        raise ValueError("Use either --input or --read-candidates, not both in the same run.")
+    if merge_outputs and (input_path or read_candidates or merge_candidates):
+        raise ValueError("--merge-outputs is a standalone mode and cannot be combined with raw or candidate inputs.")
+    if settings.get("append_candidates") and not write_candidates:
+        raise ValueError("--append-candidates requires --write-candidates.")
+    if write_header_pass_pgn and not input_path:
+        raise ValueError("--write-header-pass-pgn requires --input.")
+
+    for numeric_key in ("sample_every_n_plies", "max_positions", "positions_per_game", "progress_every", "summary_limit"):
+        if settings.get(numeric_key) is not None and int(settings[numeric_key]) < 1:
+            raise ValueError(f"{numeric_key} must be at least 1.")
+    for optional_positive in ("max_matches_per_game", "max_candidates", "sample_games", "sample_candidates"):
+        if settings.get(optional_positive) is not None and int(settings[optional_positive]) < 1:
+            raise ValueError(f"{optional_positive} must be at least 1 when provided.")
+
+    if settings.get("stop_after_first_match_per_game") and settings.get("max_matches_per_game") is None:
+        settings["max_matches_per_game"] = 1
+
+    output_path_obj = Path(output_path) if output_path else None
     return ExtractConfig(
-        input_path=Path(input_path),
+        input_path=Path(input_path) if input_path else None,
         output_path=output_path_obj,
         output_format=infer_output_format(output_path_obj, settings.get("output_format")),
         mode=str(settings["mode"]),
+        workflow=settings.get("workflow"),
+        dry_run_summary=bool(settings["dry_run_summary"]),
         white_constraints=normalize_piece_settings(settings, "white"),
         black_constraints=normalize_piece_settings(settings, "black"),
         opening=settings.get("opening"),
         variation=settings.get("variation"),
         eco=split_csv(settings.get("eco")),
+        result_filters=split_csv(settings.get("result")),
+        variant_filters=split_csv(settings.get("variant")),
+        event_contains=settings.get("event_contains"),
         min_rating=int(settings["min_rating"]),
         time_controls=split_csv(settings.get("time_controls")),
         phase=str(settings["phase"]),
         side_to_move=str(settings["side_to_move"]),
         min_move_number=int(settings["min_move_number"]),
+        sample_every_n_plies=int(settings["sample_every_n_plies"]),
+        only_after_queens_off=bool(settings["only_after_queens_off"]),
+        max_non_pawn_material=settings.get("max_non_pawn_material"),
+        stop_after_first_match_per_game=bool(settings["stop_after_first_match_per_game"]),
+        max_matches_per_game=settings.get("max_matches_per_game"),
         eval_min=settings.get("eval_min"),
         eval_max=settings.get("eval_max"),
         eval_source=str(settings["eval_source"]),
@@ -231,6 +349,9 @@ def build_config(args: argparse.Namespace) -> ExtractConfig:
         stockfish_nodes=settings.get("stockfish_nodes"),
         mate_score_policy=str(settings["mate_score_policy"]),
         eval_perspective=str(settings["eval_perspective"]),
+        skip_engine_if_pgn_eval_present=bool(settings["skip_engine_if_pgn_eval_present"]),
+        eval_cache_path=Path(settings["eval_cache_path"]) if settings.get("eval_cache_path") else None,
+        reuse_eval_cache=bool(settings["reuse_eval_cache"]),
         max_positions=int(settings["max_positions"]),
         positions_per_game=int(settings["positions_per_game"]),
         dedupe=str(settings["dedupe"]),
@@ -256,4 +377,17 @@ def build_config(args: argparse.Namespace) -> ExtractConfig:
         allow_nonstandard=bool(settings["allow_nonstandard"]),
         summary_limit=int(settings["summary_limit"]),
         log_level=str(settings["log_level"]),
+        write_candidates=Path(write_candidates) if write_candidates else None,
+        write_header_pass_pgn=Path(write_header_pass_pgn) if write_header_pass_pgn else None,
+        read_candidates=read_candidates,
+        candidate_format=str(settings["candidate_format"]),
+        append_candidates=bool(settings["append_candidates"]),
+        max_candidates=settings.get("max_candidates"),
+        sample_games=settings.get("sample_games"),
+        sample_candidates=settings.get("sample_candidates"),
+        random_seed=settings.get("random_seed"),
+        merge_candidates=merge_candidates,
+        merge_outputs=merge_outputs,
+        shard_label=settings.get("shard_label"),
+        candidate_history_moves=int(settings["candidate_history_moves"]),
     )

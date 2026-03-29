@@ -26,8 +26,11 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_logging(config.log_level)
     records = extract_positions(config)
-    write_records(records, config.output_path, config.output_format, config.mode)
-    logging.getLogger(__name__).info("Wrote %s record(s) to %s", len(records), config.output_path)
+    if config.output_path is not None:
+        write_records(records, config.output_path, config.output_format, config.mode)
+        logging.getLogger(__name__).info("Wrote %s record(s) to %s", len(records), config.output_path)
+    else:
+        logging.getLogger(__name__).info("Completed run with %s record(s).", len(records))
     return 0
 
 
