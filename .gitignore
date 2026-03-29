@@ -1,4 +1,5 @@
-/.pytest_cache
-/.venv
-/training_positions/_pycache_/*
-/training_positions/_init_.py
+/.pytest_cache/
+/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
